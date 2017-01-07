@@ -9,3 +9,9 @@ Roving Networks Bluetooth HID Profile:
 
 Structure of bluetooth message for joystick found: pg 7 
 Key mappings: pg 8
+
+To setup the pi and configuring the bluetooth slave broadcast message
+https://www.gadgetdaily.xyz/create-a-cool-sliding-and-scrollable-mobile-menu/
+
+
+HID values hopefully: http://free60.org/wiki/GamePad

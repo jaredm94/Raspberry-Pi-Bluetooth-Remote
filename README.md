@@ -14,4 +14,7 @@ To setup the pi and configuring the bluetooth slave broadcast message
 https://www.gadgetdaily.xyz/create-a-cool-sliding-and-scrollable-mobile-menu/
 
 
-HID values hopefully: http://free60.org/wiki/GamePad (http://www.freebsddiary.org/APC/usb_hid_usages.php)
+HID values hopefully:(http://www.freebsddiary.org/APC/usb_hid_usages.php)
+
+help with connecting
+http://python-evdev.readthedocs.io/en/latest/tutorial.html

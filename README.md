@@ -25,3 +25,9 @@ http://www.bluez.org/bluez-5-api-introduction-and-porting-guide/
 http://yetanotherpointlesstechblog.blogspot.com/2016/04/emulating-bluetooth-keyboard-with.html
 
  bluetoothctl
+
+
+Here the line for the Bluetooth Daemon Configuration (tested on Ubuntu)
+In the file /etc/systemd/system/dbus-org.bluez.service
+Replace the line ExecStart by:
+ExecStart=/usr/lib/bluetooth/bluetoothd -P input

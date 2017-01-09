@@ -18,3 +18,7 @@ HID values hopefully:(http://www.freebsddiary.org/APC/usb_hid_usages.php)
 
 help with connecting
 http://python-evdev.readthedocs.io/en/latest/tutorial.html
+
+
+
+http://www.bluez.org/bluez-5-api-introduction-and-porting-guide/

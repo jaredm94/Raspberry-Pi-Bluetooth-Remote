@@ -23,3 +23,5 @@ http://python-evdev.readthedocs.io/en/latest/tutorial.html
 
 http://www.bluez.org/bluez-5-api-introduction-and-porting-guide/
 http://yetanotherpointlesstechblog.blogspot.com/2016/04/emulating-bluetooth-keyboard-with.html
+
+ bluetoothctl

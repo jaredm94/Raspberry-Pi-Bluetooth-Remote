@@ -7,323 +7,230 @@
 #!/usr/bin/python2.7
 #Code fixed from http://www.linuxuser.co.uk/tutorials/emulate-a-bluetooth-keyboard-with-the-raspberry-pi
 
+#!/usr/bin/python
+#
+# YAPTB Bluetooth keyboard emulator DBUS Service
+# 
+# Adapted from 
+# www.linuxuser.co.uk/tutorials/emulate-bluetooth-keyboard-with-the-raspberry-pi
+#
+#
+
+#from __future__ import absolute_import, print_function, unicode_literals
+from __future__ import absolute_import, print_function
+
+from optparse import OptionParser, make_option
 import os
 import sys
+import uuid
+import dbus
+import dbus.service
+import dbus.mainloop.glib
+import time
 import bluetooth
 from bluetooth import *
-import dbus
-import time
-import evdev
-from evdev import *
-import keymap
 
-class Bluetooth:
-  P_CTRL = 17
-  P_INTR = 19
 
-  HOST = 0
-  PORT = 1
+import gtk
+from dbus.mainloop.glib import DBusGMainLoop
 
-  def __init__(self):
-    os.system("hciconfig hci0 class 0x002540")
-    os.system("hciconfig hci0 name Raspberry\ Pi")
-    os.system("hciconfig hci0 piscan")
-    self.scontrol = BluetoothSocket(L2CAP)
-    self.sinterrupt = BluetoothSocket(L2CAP)
-    self.scontrol.bind(("", Bluetooth.P_CTRL))
-    self.sinterrupt.bind(("", Bluetooth.P_INTR))
-    self.bus = dbus.SystemBus()
 
-    self.manager = dbus.Interface(self.bus.get_object("org.bluez", "/"), "org.bluez.Manager")
-    adapter_path = self.manager.DefaultAdapter()
-    self.service = dbus.Interface(self.bus.get_object("org.bluez", adapter_path), "org.bluez.Service")
+#
+#define a bluez 5 profile object for our keyboard
+#
+class BTKbBluezProfile(dbus.service.Object):
+    fd = -1
 
-    with open(sys.path[0] + "/sdp_record.xml", "r") as fh:
-      self.service_record = fh.read()
+    @dbus.service.method("org.bluez.Profile1",
+                                    in_signature="", out_signature="")
+    def Release(self):
+            print("Release")
+            mainloop.quit()
 
-  def listen(self):
-    self.service_handle = self.service.AddRecord(self.service_record)
-    print "Service record added"
-    self.scontrol.listen(1) # Limit of 1 connection
-    self.sinterrupt.listen(1)
-    print "Waiting for a connection"
-    self.ccontrol, self.cinfo = self.scontrol.accept()
-    print "Got a connection on the control channel from " + self.cinfo[Bluetooth.HOST]
-    self.cinterrupt, self.cinfo = self.sinterrupt.accept()
-    print "Got a connection on the interrupt channel fro " + self.cinfo[Bluetooth.HOST]
+    @dbus.service.method("org.bluez.Profile1",
+                                    in_signature="", out_signature="")
+    def Cancel(self):
+            print("Cancel")
 
-  def send_input(self, ir):
-    #  Convert the hex array to a string
-    hex_str = ""
-    for element in ir:
-      if type(element) is list:
-        # This is our bit array - convrt it to a single byte represented
-        # as a char
-        bin_str = ""
-        for bit in element:
-          bin_str += str(bit)
-        hex_str += chr(int(bin_str, 2))
-      else:
-        # This is a hex value - we can convert it straight to a char
-        hex_str += chr(element)
-    # Send an input report
-    self.cinterrupt.send(hex_str)
+    @dbus.service.method("org.bluez.Profile1", in_signature="oha{sv}", out_signature="")
+    def NewConnection(self, path, fd, properties):
+            self.fd = fd.take()
+            print("NewConnection(%s, %d)" % (path, self.fd))
+            for key in properties.keys():
+                    if key == "Version" or key == "Features":
+                            print("  %s = 0x%04x" % (key, properties[key]))
+                    else:
+                            print("  %s = %s" % (key, properties[key]))
+            
 
-class Keyboard():
-  def __init__(self):
-    # The structure for an bt keyboard input report (size is 10 bytes)
-    self.state = [
-         0xA1, # This is an input report
-         0x01, # Usage report = Keyboard
-         # Bit array for Modifier keys
-         [0,   # Right GUI - (usually the Windows key)
-          0,   # Right ALT
-          0,   # Right Shift
-          0,   # Right Control
-          0,   # Left GUI - (again, usually the Windows key)
-          0,   # Left ALT
-          0,   # Left Shift
-          0],   # Left Control
-         0x00,  # Vendor reserved
-         0x00,  # Rest is space for 6 keys
-         0x00,
-         0x00,
-         0x00,
-         0x00,
-         0x00 ]
 
-    # Keep trying to get a keyboard
-    have_dev = False
-    while have_dev == False:
-      try:
-        # Try and get a keyboard - should always be event0 as we.re only
-        # plugging one thing in
-        self.dev = InputDevice("/dev/input/event0")
-        have_dev = True
-      except OSError:
-        print "Keyboard not found, waiting 3 seconds and retrying"
-        time.sleep(3)
-      print "Found a keyboard"
+    @dbus.service.method("org.bluez.Profile1", in_signature="o", out_signature="")
+    def RequestDisconnection(self, path):
+            print("RequestDisconnection(%s)" % (path))
 
-  def change_state(self, event):
-    evdev_code = ecodes.KEY[event.code]
-    modkey_element = keymap.modkey(evdev_code)
-    if modkey_element > 0:
-      # Need to set one of the modifier bits
-      if self.state[2][modkey_element] == 0:
-        self.state[2][modkey_element] = 1
-      else:
-        self.state[2][modkey_element] = 0
-    else:
-      # Get the hex keycode of the key
-      hex_key = keymap.convert(evdev_code)
-      # Loop through elements 4 to 9 of the input report structure
-      for i in range (4, 10):
-        if self.state[i] == hex_key and event.value == 0:
-          # Code is 0 so we need to depress it
-          self.state[i] = 0x00
-          break
-        elif self.state[i] == 0x00 and event.value == 1:
-          # If the current space is empty and the key is being pressed
-          self.state[i] = hex_key
-          break
+            if (self.fd > 0):
+                    os.close(self.fd)
+                    self.fd = -1
 
-  def event_loop(self, bt):
-    for event in self.dev.read_loop():
-      # Only bother if we hit a key and it's an up or down event
-      if event.type == ecodes.EV_KEY and event.value < 2:
-        self.change_state(event)
-        bt.send_input(self.state)
+    def __init__(self, bus, path):
+            dbus.service.Object.__init__(self, bus, path)
 
+
+#
+#create a bluetooth device to emulate a HID keyboard, 
+# advertize a SDP record using our bluez profile class
+#
+class BTKbDevice():
+    #change these constants 
+    MY_ADDRESS="B8:27:EB:52:59:8E"
+    MY_DEV_NAME="DeskPi_BTKb"
+
+    #define some constants
+    P_CTRL = 17  #Service port - must match port configured in SDP record
+    P_INTR =19  #Service port - must match port configured in SDP record#Interrrupt port  
+    PROFILE_DBUS_PATH="/bluez/yaptb/btkb_profile" #dbus path of  the bluez profile we will create
+    SDP_RECORD_PATH = sys.path[0] + "/sdp_record.xml" #file path of the sdp record to laod
+    UUID="00001124-0000-1000-8000-00805f9b34fb"
+             
+ 
+    def __init__(self):
+
+        print("Setting up BT device")
+
+        self.init_bt_device()
+        self.init_bluez_profile()
+                    
+
+    #configure the bluetooth hardware device
+    def init_bt_device(self):
+
+
+        print("Configuring for name "+BTKbDevice.MY_DEV_NAME)
+
+        #set the device class to a keybord and set the name
+        os.system("hciconfig hcio class 0x002540")
+        os.system("hciconfig hcio name " + BTKbDevice.MY_DEV_NAME)
+
+        #make the device discoverable
+        os.system("hciconfig hcio piscan")
+
+
+    #set up a bluez profile to advertise device capabilities from a loaded service record
+    def init_bluez_profile(self):
+
+        print("Configuring Bluez Profile")
+
+        #setup profile options
+        service_record=self.read_sdp_service_record()
+
+        opts = {
+            "ServiceRecord":service_record,
+            "Role":"server",
+            "RequireAuthentication":False,
+            "RequireAuthorization":True
+        }
+
+        #retrieve a proxy for the bluez profile interface
+        bus = dbus.SystemBus()
+        manager = dbus.Interface(bus.get_object("org.bluez","/org/bluez"), "org.bluez.ProfileManager1")
+
+        profile = BTKbBluezProfile(bus, BTKbDevice.PROFILE_DBUS_PATH)
+
+        manager.RegisterProfile(BTKbDevice.PROFILE_DBUS_PATH, BTKbDevice.UUID,opts)
+
+        print("Profile registered ")
+
+
+    #read and return an sdp record from a file
+    def read_sdp_service_record(self):
+
+        print("Reading service record")
+
+        try:
+            fh = open(BTKbDevice.SDP_RECORD_PATH, "r")
+        except:
+            sys.exit("Could not open the sdp record. Exiting...")
+
+        return fh.read()   
+
+
+
+    #listen for incoming client connections
+    #ideally this would be handled by the Bluez 5 profile 
+    #but that didn't seem to work
+    def listen(self):
+
+        print("Waiting for connections")
+        self.scontrol=BluetoothSocket(L2CAP)
+        self.sinterrupt=BluetoothSocket(L2CAP)
+
+        #bind these sockets to a port - port zero to select next available	
+        self.scontrol.bind(("",self.P_CTRL))
+        self.sinterrupt.bind(("",self.P_INTR ))
+
+        #Start listening on the server sockets 
+        self.scontrol.listen(1) # Limit of 1 connection
+        self.sinterrupt.listen(1)
+
+        self.ccontrol,cinfo = self.scontrol.accept()
+        print ("Got a connection on the control channel from " + cinfo[0])
+
+        self.cinterrupt, cinfo = self.sinterrupt.accept()
+        print ("Got a connection on the interrupt channel from " + cinfo[0])
+
+
+    #send a string to the bluetooth host machine
+    def send_string(self,message):
+
+     #    print("Sending "+message)
+         self.cinterrupt.send(message)
+
+
+
+#define a dbus service that emulates a bluetooth keyboard
+#this will enable different clients to connect to and use 
+#the service
+class  BTKbService(dbus.service.Object):
+
+    def __init__(self):
+
+        print("Setting up service")
+
+        #set up as a dbus service
+        bus_name=dbus.service.BusName("org.yaptb.btkbservice",bus=dbus.SystemBus())
+        dbus.service.Object.__init__(self,bus_name,"/org/yaptb/btkbservice")
+
+        #create and setup our device
+        self.device= BTKbDevice();
+
+        #start listening for connections
+        self.device.listen();
+
+            
+    @dbus.service.method('org.yaptb.btkbservice', in_signature='yay')
+    def send_keys(self,modifier_byte,keys):
+
+        cmd_str=""
+        cmd_str+=chr(0xA1)
+        cmd_str+=chr(0x01)
+        cmd_str+=chr(modifier_byte)
+        cmd_str+=chr(0x00)
+
+        count=0
+        for key_code in keys:
+            if(count<6):
+                cmd_str+=chr(key_code)
+            count+=1
+
+        self.device.send_string(cmd_str);		
+
+
+#main routine
 if __name__ == "__main__":
-  if not os.geteuid() == 0:
-    sys.exit("Only root can run this script")
-  bt = Bluetooth()
-  bt.listen()
-  kb = Keyboard()
-  kb.event_loop(bt)
+    # we an only run as root
+    if not os.geteuid() == 0:
+       sys.exit("Only root can run this script")
 
-  keytable = {
-    "KEY_RESERVED" : 0,
-    "KEY_ESC" : 41,
-    "KEY_1" : 30,
-    "KEY_2" : 31,
-    "KEY_3" : 32,
-    "KEY_4" : 33,
-    "KEY_5" : 34,
-    "KEY_6" : 35,
-    "KEY_7" : 36,
-    "KEY_8" : 37,
-    "KEY_9" : 38,
-    "KEY_0" : 39,
-    "KEY_MINUS" : 45,
-    "KEY_EQUAL" : 46,
-    "KEY_BACKSPACE" : 42,
-    "KEY_TAB" : 43,
-    "KEY_Q" : 20,
-    "KEY_W" : 26,
-    "KEY_E" : 8,
-    "KEY_R" : 21,
-    "KEY_T" : 23,
-    "KEY_Y" : 28,
-    "KEY_U" : 24,
-    "KEY_I" : 12,
-    "KEY_O" : 18,
-    "KEY_P" : 19,
-    "KEY_LEFTBRACE" : 47,
-    "KEY_RIGHTBRACE" : 48,
-    "KEY_ENTER" : 40,
-    "KEY_LEFTCTRL" : 224,
-    "KEY_A" : 4,
-    "KEY_S" : 22,
-    "KEY_D" : 7,
-    "KEY_F" : 9,
-    "KEY_G" : 10,
-    "KEY_H" : 11,
-    "KEY_J" : 13,
-    "KEY_K" : 14,
-    "KEY_L" : 15,
-    "KEY_SEMICOLON" : 51,
-    "KEY_APOSTROPHE" : 52,
-    "KEY_GRAVE" : 53,
-    "KEY_LEFTSHIFT" : 225,
-    "KEY_BACKSLASH" : 50,
-    "KEY_Z" : 29,
-    "KEY_X" : 27,
-    "KEY_C" : 6,
-    "KEY_V" : 25,
-    "KEY_B" : 5,
-    "KEY_N" : 17,
-    "KEY_M" : 16,
-    "KEY_COMMA" : 54,
-    "KEY_DOT" : 55,
-    "KEY_SLASH" : 56,
-    "KEY_RIGHTSHIFT" : 229,
-    "KEY_KPASTERISK" : 85,
-    "KEY_LEFTALT" : 226,
-    "KEY_SPACE" : 44,
-    "KEY_CAPSLOCK" : 57,
-    "KEY_F1" : 58,
-    "KEY_F2" : 59,
-    "KEY_F3" : 60,
-    "KEY_F4" : 61,
-    "KEY_F5" : 62,
-    "KEY_F6" : 63,
-    "KEY_F7" : 64,
-    "KEY_F8" : 65,
-    "KEY_F9" : 66,
-    "KEY_F10" : 67,
-    "KEY_NUMLOCK" : 83,
-    "KEY_SCROLLLOCK" : 71,
-    "KEY_KP7" : 95,
-    "KEY_KP8" : 96,
-    "KEY_KP9" : 97,
-    "KEY_KPMINUS" : 86,
-    "KEY_KP4" : 92,
-    "KEY_KP5" : 93,
-    "KEY_KP6" : 94,
-    "KEY_KPPLUS" : 87,
-    "KEY_KP1" : 89,
-    "KEY_KP2" : 90,
-    "KEY_KP3" : 91,
-    "KEY_KP0" : 98,
-    "KEY_KPDOT" : 99,
-    "KEY_ZENKAKUHANKAKU" : 148,
-    "KEY_102ND" : 100,
-    "KEY_F11" : 68,
-    "KEY_F12" : 69,
-    "KEY_RO" : 135,
-    "KEY_KATAKANA" : 146,
-    "KEY_HIRAGANA" : 147,
-    "KEY_HENKAN" : 138,
-    "KEY_KATAKANAHIRAGANA" : 136,
-    "KEY_MUHENKAN" : 139,
-    "KEY_KPJPCOMMA" : 140,
-    "KEY_KPENTER" : 88,
-    "KEY_RIGHTCTRL" : 228,
-    "KEY_KPSLASH" : 84,
-    "KEY_SYSRQ" : 70,
-    "KEY_RIGHTALT" : 230,
-    "KEY_HOME" : 74,
-    "KEY_UP" : 82,
-    "KEY_PAGEUP" : 75,
-    "KEY_LEFT" : 80,
-    "KEY_RIGHT" : 79,
-    "KEY_END" : 77,
-    "KEY_DOWN" : 81,
-    "KEY_PAGEDOWN" : 78,
-    "KEY_INSERT" : 73,
-    "KEY_DELETE" : 76,
-    "KEY_MUTE" : 239,
-    "KEY_VOLUMEDOWN" : 238,
-    "KEY_VOLUMEUP" : 237,
-    "KEY_POWER" : 102,
-    "KEY_KPEQUAL" : 103,
-    "KEY_PAUSE" : 72,
-    "KEY_KPCOMMA" : 133,
-    "KEY_HANGEUL" : 144,
-    "KEY_HANJA" : 145,
-    "KEY_YEN" : 137,
-    "KEY_LEFTMETA" : 227,
-    "KEY_RIGHTMETA" : 231,
-    "KEY_COMPOSE" : 101,
-    "KEY_STOP" : 243,
-    "KEY_AGAIN" : 121,
-    "KEY_PROPS" : 118,
-    "KEY_UNDO" : 122,
-    "KEY_FRONT" : 119,
-    "KEY_COPY" : 124,
-    "KEY_OPEN" : 116,
-    "KEY_PASTE" : 125,
-    "KEY_FIND" : 244,
-    "KEY_CUT" : 123,
-    "KEY_HELP" : 117,
-    "KEY_CALC" : 251,
-    "KEY_SLEEP" : 248,
-    "KEY_WWW" : 240,
-    "KEY_COFFEE" : 249,
-    "KEY_BACK" : 241,
-    "KEY_FORWARD" : 242,
-    "KEY_EJECTCD" : 236,
-    "KEY_NEXTSONG" : 235,
-    "KEY_PLAYPAUSE" : 232,
-    "KEY_PREVIOUSSONG" : 234,
-    "KEY_STOPCD" : 233,
-    "KEY_REFRESH" : 250,
-    "KEY_EDIT" : 247,
-    "KEY_SCROLLUP" : 245,
-    "KEY_SCROLLDOWN" : 246,
-    "KEY_F13" : 104,
-    "KEY_F14" : 105,
-    "KEY_F15" : 106,
-    "KEY_F16" : 107,
-    "KEY_F17" : 108,
-    "KEY_F18" : 109,
-    "KEY_F19" : 110,
-    "KEY_F20" : 111,
-    "KEY_F21" : 112,
-    "KEY_F22" : 113,
-    "KEY_F23" : 114,
-    "KEY_F24" : 115
-}
-
-# Map modifier keys to array element in the bit array
-modkeys = {
-   "KEY_RIGHTMETA" : 0,
-   "KEY_RIGHTALT" : 1,
-   "KEY_RIGHTSHIFT" : 2,
-   "KEY_RIGHTCTRL" : 3,
-   "KEY_LEFTMETA" : 4,
-   "KEY_LEFTALT": 5,
-   "KEY_LEFTSHIFT": 6,
-   "KEY_LEFTCTRL": 7
-}
-
-def convert(evdev_keycode):
-    return keytable[evdev_keycode]
-
-def modkey(evdev_keycode):
-    if evdev_keycode in modkeys:
-        return modkeys[evdev_keycode]
-    else:
-        return -1 # Return an invalid array element
+    DBusGMainLoop(set_as_default=True)
+    myservice = BTKbService();
+    gtk.main()

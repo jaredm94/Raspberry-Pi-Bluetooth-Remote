@@ -67,7 +67,10 @@ if __name__ == "__main__":
 	game = Gamepad()
 
 	for i in range(0,100,1):
-		game.send_input()
 		time.sleep(4)
+		self.state[2] = 0x91
+		game.send_input()
+		self.state[2] = 0x00
+		game.send_input()
 
 

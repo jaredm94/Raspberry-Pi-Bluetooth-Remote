@@ -174,7 +174,7 @@ class BTKbDevice():
     #send a string to the bluetooth host machine
     def send_string(self,message):
 
-         print("Sending "+message)
+         print(type(message))
          self.cinterrupt.send(message)
 
 

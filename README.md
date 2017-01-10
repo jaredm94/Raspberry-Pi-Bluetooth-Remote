@@ -34,3 +34,4 @@ ExecStart=/usr/lib/bluetooth/bluetoothd -P input
 
 To advertise as something else: http://www.question-defense.com/tools/class-of-device-bluetooth-cod-list-in-binary-and-hex
                                http://askubuntu.com/questions/439088/how-to-change-bluetooth-device-class
+                               http://netlab.cs.ucla.edu/wiki/files/class_of_device.pdf
